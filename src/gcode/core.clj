@@ -1,5 +1,6 @@
 (ns gcode.core
-  (:require [clojure.string :as string]))
+  (:require [clojure.string :as string]
+            [clojure.java.io :as io]))
 
 (defn read-double
   [s]
@@ -40,7 +41,7 @@
    :temporary {}
    :moves []
    :errors []
-   :line 0})
+   :line 1})
 
 (defn lookup-path
   [codekw value]
@@ -48,14 +49,17 @@
     (cond
       (map? entry) (let [subentry (get entry value)]
                      [(first subentry) (second subentry)])
-      (vector? entry) [(first entry) ((second entry) value)])))
+      (vector? entry) [(first entry) ((second entry) value)]
+      (nil? entry) [nil nil])))
 
 (defn apply-code
   [s c]
   (let [gcode (keyword (.toLowerCase (.substring c 0 1)))
         grest (.substring c 1)
         [path value] (lookup-path gcode grest)]
-    (assoc-in s path value)))
+    (if path
+      (assoc-in s path value)
+      (assoc s :errors (conj (:errors s) (str "line " (:line s) ": Unhandled code " c))))))
 
 (defn mutate-state
   [mach-state gcode-seq]
@@ -81,10 +85,12 @@
 
 (defn make-move
   [mach-state move-type move-coordsys distance-mode from-coord to-coord]
-  (let [base {:move-type move-type :distance-mode distance-mode :from-coord from-coord :to-coord to-coord :line (inc (:line mach-state))}]
+  (let [base {:move-type move-type :distance-mode distance-mode :from-coord from-coord :to-coord to-coord :line (:line mach-state)}]
     (case move-type
-      :feed (-> base
-                (assoc :feed-rate (get-state-var mach-state :feed-rate nil)))
+      (:rapid :feed) (if (= from-coord to-coord)
+                       nil
+                       (-> base
+                           (assoc :feed-rate (get-state-var mach-state :feed-rate nil))))
       (:cw-arc :ccw-arc) (-> base
                              (assoc :feed-rate (get-state-var mach-state :feed-rate nil))
                              (assoc :center (get-state-var mach-state :center nil) :turns (get-state-var mach-state :parameter 1)))
@@ -110,15 +116,37 @@
         (assoc-in [:modal :coord] dest-coord)
         (update-in [:line] inc)))) 
 
+(defn extract-feed-lines
+  [moves]
+  (let [extract-pt (fn [m wh] (let [cd (wh m)] (map #(%1 cd) [:x :y :z])))]
+    (:lines (reduce (fn [st mv]
+              (let [t (:move-type mv)
+                    lt (:move-type st)
+                    ln (:line st)]
+                (if (= t lt)
+                  (if (= :feed t)
+                    (assoc st :line (conj ln (extract-pt mv :to-coord)))
+                    st)
+                  (if (= :feed t)
+                    (assoc st :move-type t :line [(extract-pt mv :from-coord) (extract-pt mv :to-coord)])
+                    (assoc st :move-type t :lines (conj (:lines st) ln) :line nil)))))
+                    {:move-type :rapid :lines nil :line nil} moves))))
+
+
 (defn process-block
-    [mach-state gcode-block]
-    (let [cseq (string/split gcode-block #"\s+")
-          updated-state (mutate-state mach-state cseq)]
-      (advance-state mach-state updated-state)))
+  [mach-state gcode-block]
+  (let [cseq (string/split gcode-block #"\s+")
+        updated-state (mutate-state mach-state cseq)]
+    (advance-state mach-state updated-state)))
 
 (defn process
-    [gcode-seq]
-    (reduce process-block (create-state) gcode-seq))
+  [gcode-seq]
+  (reduce process-block (create-state) gcode-seq))
+
+(defn process-file
+  [f]
+  (with-open [r (io/reader f)]
+    (process (line-seq r))))
 
 (defn location
   [st]
