@@ -1,13 +1,13 @@
 # gcode
 
-A Clojure library designed to ... well, that part is up to you.
+A clojure Gcode processor
 
 ## Usage
 
-FIXME
+process Gcode
 
 ## License
 
-Copyright © 2013 FIXME
+Copyright © 2013 Chris McFarlen
 
 Distributed under the Eclipse Public License, the same as Clojure.
