@@ -1,6 +1,5 @@
-(ns gcode.core
-  (:require [clojure.string :as string]
-            [clojure.java.io :as io]))
+(ns ^:shared gcode.core
+  (:require [clojure.string :as string]))
 
 (defn read-double
   [s]
